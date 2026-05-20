@@ -31,7 +31,7 @@ class MiddlewareClient {
     for (let i = 0; i < 3; i++) {
       try {
         const response = await fetch(url, options);
-        if (response.ok) return true;
+        if (response.ok) return await response.json().catch(() => true);
         const text = await response.text();
         lastError = new Error(`HTTP ${response.status}: ${text}`);
       } catch (err) {

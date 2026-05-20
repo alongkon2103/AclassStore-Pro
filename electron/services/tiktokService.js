@@ -10,13 +10,13 @@ const HEARTBEAT_INTERVAL = 15000;
 
 function startConnection(tiktokUsername, middlewareClient, callbacks) {
   isStopping = false;
-  
+
   async function connect() {
     if (isStopping) return;
 
     // Clean up existing connection if any
     if (tiktokConnection) {
-      try { tiktokConnection.disconnect(); } catch (e) {}
+      try { tiktokConnection.disconnect(); } catch (e) { }
       tiktokConnection = null;
     }
 
@@ -25,15 +25,14 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
       enableWebsocketUpgrade: true,
       requestPollingIntervalMs: 2000
     });
-
     tiktokConnection.on('connected', (state) => {
       callbacks.onStatus(true, `Live @${tiktokUsername}`);
-      middlewareClient.push_event('status', { connected: true }).catch(() => {});
-      
+      middlewareClient.push_event('status', { connected: true }).catch(() => { });
+
       // Start Heartbeat
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       heartbeatTimer = setInterval(() => {
-        middlewareClient.heartbeat().catch(() => {});
+        middlewareClient.heartbeat().catch(() => { });
       }, HEARTBEAT_INTERVAL);
     });
 
@@ -87,16 +86,25 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
           giftName: data.giftName,
           username: data.uniqueId,
           nickname: data.nickname,
-          diamond: diamondCount,      // For backward compatibility (Python style)
-          diamondCount: diamondCount, // For middleware logging
+          diamond: diamondCount,
+          diamondCount: diamondCount,
           repeatCount: data.repeatCount,
           totalValue: diamondCount * data.repeatCount,
           repeatEnd: data.repeatEnd,
           profilePictureUrl: data.profilePictureUrl,
           timestamp: new Date().toISOString()
         };
-        middlewareClient.push_event('gift', eventData).catch(() => {});
-        callbacks.onGift(eventData);
+        middlewareClient.push_event('gift', eventData)
+          .then(result => {
+            console.log('[DEBUG RESULT]', JSON.stringify(result)); // ✅ เพิ่มตรงนี้
+            if (!result) {
+              console.error('[PUSH_EVENT FAILED] server rejected gift');
+              return;
+            }
+            if (result.pushed === false) return;
+            callbacks.onGift(eventData);
+          })
+          .catch(err => console.error('[PUSH_EVENT ERROR]', err.message));
       }
     });
 
@@ -106,7 +114,7 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
         nickname: data.nickname,
         comment: data.comment,
         profilePictureUrl: data.profilePictureUrl
-      }).catch(() => {});
+      }).catch(() => { });
       callbacks.onChat?.(data);
     });
 
@@ -117,7 +125,7 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
         likeCount: data.likeCount,
         totalLikeCount: data.totalLikeCount,
         profilePictureUrl: data.profilePictureUrl
-      }).catch(() => {});
+      }).catch(() => { });
       callbacks.onLike?.(data);
     });
 
@@ -126,7 +134,7 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
         username: data.uniqueId,
         nickname: data.nickname,
         profilePictureUrl: data.profilePictureUrl
-      }).catch(() => {});
+      }).catch(() => { });
       callbacks.onFollow?.(data);
     });
 
@@ -157,7 +165,7 @@ function stopConnection() {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   if (retryTimer) clearTimeout(retryTimer);
   if (tiktokConnection) {
-    try { tiktokConnection.disconnect(); } catch (e) {}
+    try { tiktokConnection.disconnect(); } catch (e) { }
     tiktokConnection = null;
   }
 }

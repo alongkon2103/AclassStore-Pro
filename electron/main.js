@@ -8,7 +8,10 @@ const { startConnection, stopConnection } = require('./services/tiktokService');
 
 // const SERVER_URL = isDev ? "http://127.0.0.1:3001" : "https://api.aclassstore.com";
 
+// const SERVER_URL = "http://127.0.0.1:3001";
+
 const SERVER_URL = "https://api.aclassstore.com";
+
 
 let mainWindow;
 let middlewareClient = null;

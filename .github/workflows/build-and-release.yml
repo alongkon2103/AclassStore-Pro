@@ -3,20 +3,15 @@ name: Build and Release Electron App
 on:
   push:
     tags:
-      - 'v*' # ทำงานอัตโนมัติเมื่อพี่ทำการ Push Tag เช่น v1.0.0, v1.1.0
+      - 'v*'
 
 permissions:
   contents: write
 
-  
 jobs:
   release:
-    name: Build for ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest]
+    name: Build and Publish
+    runs-on: windows-latest
 
     steps:
       - name: Checkout Repository
@@ -26,71 +21,53 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
 
       - name: Install Dependencies
         run: npm ci
 
-      - name: Build & Publish App
-        uses: samuelmeuli/action-electron-builder@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          build_script_name: electron:build
-          release: true
+      - name: Build Electron App
+        run: npm run electron:build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # 📝 มูฟเม้นท์พิเศษ: สร้างและแต่งหน้า Release Notes อัตโนมัติหลังจากบิวด์ไฟล์เสร็จสิ้น
-  publish-release-notes:
-    name: Publish Beautiful Release Notes
-    needs: release # รอนอกรอบให้ทั้งเครื่อง Win และ Mac บิวด์เสร็จก่อน
-    runs-on: ubuntu-latest
-    steps:
       - name: Extract Tag Version
         id: get_version
+        shell: bash
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Update Release Description
+      - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: 🚀 Aclass Live - เวอร์ชัน v${{ steps.get_version.outputs.VERSION }} (Official Release)
           draft: false
           prerelease: false
-          # ใส่รายละเอียดวิธีการติดตั้งภาษาไทยที่แต่งไว้ลงในนี้แบบอัตโนมัติ
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/*.yml
           body: |
-            ยินดีต้อนรับสู่โปรแกรม **Aclass Live** เครื่องมือจัดการและเชื่อมต่อระบบ TikTok Live เข้ากับคีย์บอร์ดฮาร์ดแวร์ และเกม Minecraft (RCON) สำหรับสตรีมเมอร์ระดับโปร!
+            ยินดีต้อนรับสู่โปรแกรม **Aclass Live**
 
             ---
 
-            ## 📦 ช่องทางดาวน์โหลด (Downloads)
-            เลื่อนลงไปที่หัวข้อ **Assets** ด้านล่างสุดแล้วเลือกดาวน์โหลดไฟล์ตามระบบปฏิบัติการของคุณ:
-            * 🪟 **สำหรับ Windows:** ดาวน์โหลดไฟล์ `AclassLive-Setup-${{ steps.get_version.outputs.VERSION }}.exe`
-            * 🍏 **สำหรับ macOS:** ดาวน์โหลดไฟล์ `AclassLive-${{ steps.get_version.outputs.VERSION }}.dmg`
+            ## 📦 ช่องทางดาวน์โหลด
+
+            เลื่อนลงไปที่หัวข้อ **Assets** ด้านล่างสุดแล้วดาวน์โหลดไฟล์ `AclassLive-Setup-${{ steps.get_version.outputs.VERSION }}.exe`
 
             ---
 
-            ## 🛠️ วิธีการติดตั้งโปรแกรม (Installation Guide)
+            ## 🛠️ วิธีการติดตั้ง
 
-            ### 🪟 สำหรับผู้ใช้งาน Windows
-            1. เมื่อดาวน์โหลดไฟล์ `AclassLive-Setup-${{ steps.get_version.outputs.VERSION }}.exe` เสร็จแล้ว ให้**ดับเบิลคลิก**ที่ตัวไฟล์เพื่อเริ่มติดตั้ง
-            2. ระบบจะทำการติดตั้งโปรแกรมลงเครื่องโดยอัตโนมัติ (ใช้เวลาประมาณ 5-10 วินาที)
-            3. เมื่อติดตั้งเสร็จ โปรแกรมจะเปิดขึ้นมาทันที และระบบจะสร้างไอคอนทางลัดไว้ที่หน้าจอ **Desktop** ของคุณ
-            4. ในการใช้งานครั้งต่อไป สามารถดับเบิลคลิกที่ไอคอน **AclassLive** บนหน้าจอเพื่อเข้าสู่ระบบได้เลย!
+            1. ดับเบิลคลิกไฟล์ `.exe` เพื่อติดตั้ง
+            2. โปรแกรมจะเปิดขึ้นมาทันทีหลังติดตั้ง
 
-            > ⚠️ **หมายเหตุสำหรับ Windows (SmartScreen):**
-            > หากตัวป้องกันของ Windows ขึ้นเตือนภัย (Windows protected your PC) เนื่องจากเป็นโปรแกรมเวอร์ชันแรกและยังไม่ได้ซื้อใบรับรองดิจิทัลราคาแพง ให้กดที่คำว่า **"More info"** แล้วเลือก **"Run anyway"** เพื่อเข้าใช้งานตามปกติได้เลยครับ ปลอดภัย 100% แน่นอน
-
-            ### 🍏 สำหรับผู้ใช้งาน macOS (Mac)
-            1. ดับเบิลคลิกที่ไฟล์ `AclassLive-${{ steps.get_version.outputs.VERSION }}.dmg` ที่ดาวน์โหลดมา
-            2. จะมีหน้าต่างป๊อปอัปปรากฏขึ้น ให้ทำการ**ลากไอคอนแอป Aclass Live ไปวางในโฟลเดอร์ Applications** (โฟลเดอร์แอปพลิเคชัน)
-            3. เปิดใช้งานโปรแกรมผ่าน Launchpad หรือโฟลเดอร์ Applications ได้ทันที
+            > ⚠️ หาก Windows ขึ้น SmartScreen ให้กด "More info" แล้วเลือก "Run anyway"
 
             ---
 
-            ## 🔑 ข้อมูลการเข้าใช้งานหลังติดตั้ง
-            * สามารถเข้าไปซื้อ Whitelist รูปแบบ Premium เพื่อนรับสิทธิ์และ Key ในการใช้โปรแกรม
-            * ระบบจะทำการล็อกรหัสฮาร์ดแวร์ (HWID) ไว้กับเครื่องแรกที่คุณเข้าสู่ระบบทันที (ป้องกันสิทธิ์การใช้งานซ้อน)
+            💡 หากพบปัญหา ติดต่อทีม AclassStore ได้ตลอด 24 ชั่วโมง
 
-            ---
-            💡 *หากพบปัญหาในการใช้งาน หรือต้องการสอบถามข้อมูลเพิ่มเติม สามารถติดต่อทีมพัฒนาได้ผ่านทางช่องทางหลักของค่าย AclassStore ได้ตลอด 24 ชั่วโมงครับ*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
