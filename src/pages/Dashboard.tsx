@@ -11,46 +11,67 @@ import {
   Settings
 } from 'lucide-react';
 
+type AppStatus = 'OFFLINE' | 'WAIT' | 'LIVE';
+
 interface LogEntry {
   id: string | number;
   time: string;
   user?: string;
-  message?: string; // Optional since gift logs don't use it
+  message?: string;
   type: 'gift' | 'comment' | 'like' | 'follow' | 'system' | 'error';
   count?: number;
   giftName?: string;
   diamond?: number;
 }
 
+interface StatusPayload {
+  connected: boolean;
+  message: string;
+  state?: AppStatus;
+}
+
 const Dashboard: React.FC = () => {
   const [licenseKey, setLicenseKey] = useState('');
-  const [status, setStatus] = useState<'OFFLINE' | 'WAIT' | 'LIVE'>('OFFLINE');
+  const [status, setStatus] = useState<AppStatus>('OFFLINE');
   const [statusMessage, setStatusMessage] = useState('Waiting for connection');
   const [tiktokUser, setTiktokUser] = useState('');
 
-  // Stats
-  const [totals, setTotals] = useState({ gifts: 0, likes: 0, viewers: 0 });
+  const [totals, setTotals] = useState({ gifts: 0, likes: 0 });
 
-  // Logs categories
   const [giftLogs, setGiftLogs] = useState<LogEntry[]>([]);
   const [commentLogs, setCommentLogs] = useState<LogEntry[]>([]);
   const [likeLogs, setLikeLogs] = useState<LogEntry[]>([]);
   const [followLogs, setFollowLogs] = useState<LogEntry[]>([]);
   const [systemLogs, setSystemLogs] = useState<LogEntry[]>([]);
 
-  // Refs for auto-scroll
   const giftRef = useRef<HTMLDivElement>(null);
   const commentRef = useRef<HTMLDivElement>(null);
   const likeRef = useRef<HTMLDivElement>(null);
   const followRef = useRef<HTMLDivElement>(null);
   const systemRef = useRef<HTMLDivElement>(null);
 
+  const addSystemLog = (type: 'system' | 'error', message: string) => {
+    const newLog: LogEntry = {
+      id: Date.now() + Math.random(),
+      time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
+      message,
+      type
+    };
+    setSystemLogs(prev => [newLog, ...prev.slice(0, 199)]);
+  };
+
   useEffect(() => {
-    // Setup IPC Listeners
-    const offStatus = (window as any).electron.on('tiktok:status', (data: { connected: boolean, message: string }) => {
-      setStatus(data.connected ? 'LIVE' : (data.message.includes('retry') || data.message.includes('Connect') ? 'WAIT' : 'OFFLINE'));
+    const offStatus = (window as any).electron.on('tiktok:status', (data: StatusPayload) => {
+      // ใช้ state จาก backend โดยตรง ไม่ต้อง parse string
+      if (data.state) {
+        setStatus(data.state);
+      } else {
+        setStatus(data.connected ? 'LIVE' : 'OFFLINE');
+      }
+
       setStatusMessage(data.message);
       addSystemLog('system', data.message);
+
       if (data.connected) {
         const match = data.message.match(/@(\w+)/);
         if (match) setTiktokUser(match[1]);
@@ -122,18 +143,8 @@ const Dashboard: React.FC = () => {
     };
   }, []);
 
-  const addSystemLog = (type: 'system' | 'error', message: string) => {
-    const newLog: LogEntry = {
-      id: Date.now() + Math.random(),
-      time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
-      message,
-      type
-    };
-    setSystemLogs(prev => [newLog, ...prev.slice(0, 199)]);
-  };
-
   const handleStart = async () => {
-    if (!licenseKey) {
+    if (!licenseKey.trim()) {
       addSystemLog('error', 'License key is required');
       return;
     }
@@ -160,6 +171,7 @@ const Dashboard: React.FC = () => {
     await (window as any).electron.invoke('tiktok:disconnect');
     setStatus('OFFLINE');
     setTiktokUser('');
+    setTotals({ gifts: 0, likes: 0 });
     setStatusMessage('Monitoring stopped');
   };
 
@@ -175,12 +187,12 @@ const Dashboard: React.FC = () => {
     scrollRef, 
     renderLine 
   }: { 
-    title: string, 
-    icon: React.ReactNode, 
-    color: string, 
-    logs: LogEntry[], 
-    scrollRef: React.RefObject<HTMLDivElement | null>,
-    renderLine: (log: LogEntry) => React.ReactNode
+    title: string;
+    icon: React.ReactNode;
+    color: string;
+    logs: LogEntry[];
+    scrollRef: React.RefObject<HTMLDivElement | null>;
+    renderLine: (log: LogEntry) => React.ReactNode;
   }) => (
     <div className="flex flex-col bg-surface border border-border rounded-xl overflow-hidden h-full shadow-lg">
       <div className="p-3 border-b border-border/50 flex items-center justify-between bg-surface2/30">
@@ -214,7 +226,7 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-bg">
-      {/* Top Bar / Header */}
+      {/* Header */}
       <div className="h-24 border-b border-border px-6 flex items-center justify-between bg-surface/80 backdrop-blur-md shrink-0 drag-region">
         <div className="flex flex-col gap-1 w-96 no-drag">
           <div className="flex items-center gap-2 mb-1">
@@ -252,11 +264,13 @@ const Dashboard: React.FC = () => {
         <div className="flex items-center gap-8 no-drag">
           <div className="flex flex-col items-end">
             <span className="text-[10px] text-text3 font-bold uppercase tracking-widest">Target Account</span>
-            <span className="text-sm font-bold text-text">{status === 'LIVE' ? `@${tiktokUser}` : 'Disconnected'}</span>
+            <span className="text-sm font-bold text-text">
+              {status === 'LIVE' ? `@${tiktokUser}` : 'Disconnected'}
+            </span>
           </div>
-          
+
           <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider border shadow-sm transition-all ${
-            status === 'LIVE' ? 'bg-green/10 text-green border-green/30' : 
+            status === 'LIVE' ? 'bg-green/10 text-green border-green/30' :
             status === 'WAIT' ? 'bg-amber/10 text-amber border-amber/30 animate-pulse' :
             'bg-red/10 text-red border-red/30'
           }`}>
@@ -268,7 +282,7 @@ const Dashboard: React.FC = () => {
             <button className="p-2 hover:bg-surface2 rounded-lg transition-colors text-text3">
               <Settings size={18} />
             </button>
-            <button 
+            <button
               onClick={closeApp}
               className="p-2 hover:bg-red/10 hover:text-red rounded-lg transition-colors text-text3"
             >
@@ -280,14 +294,14 @@ const Dashboard: React.FC = () => {
 
       <div className="flex-1 flex overflow-hidden p-5 gap-5">
         <div className="w-80 shrink-0">
-          <LogPanel 
-            title="System & Errors" 
-            icon={<AlertCircle size={14} />} 
-            color="text-text" 
-            logs={systemLogs} 
+          <LogPanel
+            title="System & Errors"
+            icon={<AlertCircle size={14} />}
+            color="text-text"
+            logs={systemLogs}
             scrollRef={systemRef}
             renderLine={(log) => (
-              <span className={`${log.type === 'error' ? 'text-red font-bold' : 'text-text2'}`}>
+              <span className={log.type === 'error' ? 'text-red font-bold' : 'text-text2'}>
                 {log.message}
               </span>
             )}
@@ -296,11 +310,11 @@ const Dashboard: React.FC = () => {
 
         <div className="flex-1 flex flex-col gap-5 overflow-hidden">
           <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-5 overflow-hidden">
-            <LogPanel 
-              title="Gifts" 
-              icon={<Gift size={14} />} 
-              color="text-purple" 
-              logs={giftLogs} 
+            <LogPanel
+              title="Gifts"
+              icon={<Gift size={14} />}
+              color="text-purple"
+              logs={giftLogs}
               scrollRef={giftRef}
               renderLine={(log) => (
                 <>
@@ -313,11 +327,11 @@ const Dashboard: React.FC = () => {
                 </>
               )}
             />
-            <LogPanel 
-              title="Comments" 
-              icon={<MessageSquare size={14} />} 
-              color="text-cyan" 
-              logs={commentLogs} 
+            <LogPanel
+              title="Comments"
+              icon={<MessageSquare size={14} />}
+              color="text-cyan"
+              logs={commentLogs}
               scrollRef={commentRef}
               renderLine={(log) => (
                 <>
@@ -326,11 +340,11 @@ const Dashboard: React.FC = () => {
                 </>
               )}
             />
-            <LogPanel 
-              title="Likes" 
-              icon={<Heart size={14} />} 
-              color="text-pink" 
-              logs={likeLogs} 
+            <LogPanel
+              title="Likes"
+              icon={<Heart size={14} />}
+              color="text-pink"
+              logs={likeLogs}
               scrollRef={likeRef}
               renderLine={(log) => (
                 <>
@@ -340,11 +354,11 @@ const Dashboard: React.FC = () => {
                 </>
               )}
             />
-            <LogPanel 
-              title="Follows" 
-              icon={<UserPlus size={14} />} 
-              color="text-amber" 
-              logs={followLogs} 
+            <LogPanel
+              title="Follows"
+              icon={<UserPlus size={14} />}
+              color="text-amber"
+              logs={followLogs}
               scrollRef={followRef}
               renderLine={(log) => (
                 <>

@@ -64,7 +64,7 @@ function startConnection(tiktokUsername, middlewareClient, callbacks, sessionDat
 
     tiktokConnection.on(WebcastEvent.CONNECTED, () => {
       retryCount = 0;
-      callbacks.onStatus(true, `Live @${tiktokUsername}`);
+      callbacks.onStatus(true, `Live @${tiktokUsername}`, 'LIVE');
       middlewareClient.push_event('status', { connected: true }).catch(() => {});
       heartbeatTimer = setInterval(() => {
         middlewareClient.heartbeat().catch(() => {});
@@ -75,13 +75,13 @@ function startConnection(tiktokUsername, middlewareClient, callbacks, sessionDat
       clearTimers();
       if (!isStopping) {
         const delay = getRetryDelay();
-        callbacks.onStatus(false, `Disconnected — retry in ${Math.round(delay / 1000)}s`);
+        callbacks.onStatus(false, `Disconnected — retry in ${Math.round(delay / 1000)}s`, 'WAIT');
         scheduleRetry(delay);
       }
     });
 
     tiktokConnection.on(WebcastEvent.STREAM_END, () => {
-      callbacks.onStatus(false, 'Stream ended');
+      callbacks.onStatus(false, 'Stream ended', 'OFFLINE');
       stopConnection();
     });
 
@@ -93,6 +93,7 @@ function startConnection(tiktokUsername, middlewareClient, callbacks, sessionDat
       if (!isStopping) {
         clearTimers();
         const delay = getRetryDelay();
+        callbacks.onStatus(false, `Error — retry in ${Math.round(delay / 1000)}s`, 'WAIT');
         scheduleRetry(delay);
       }
     });
@@ -157,13 +158,13 @@ function startConnection(tiktokUsername, middlewareClient, callbacks, sessionDat
     });
 
     try {
-      callbacks.onStatus(false, `Connecting to @${tiktokUsername}...`);
+      callbacks.onStatus(false, `Connecting to @${tiktokUsername}...`, 'WAIT');
       await tiktokConnection.connect();
     } catch (err) {
       if (!isStopping) {
         const errMsg = err?.message || String(err);
         const delay = getRetryDelay();
-        callbacks.onStatus(false, `${errMsg} — retry in ${Math.round(delay / 1000)}s`);
+        callbacks.onStatus(false, `${errMsg} — retry in ${Math.round(delay / 1000)}s`, 'WAIT');
         scheduleRetry(delay);
       }
     }

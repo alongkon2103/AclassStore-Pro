@@ -15,6 +15,12 @@ let middlewareClient = null;
 let sessionInfo = { token: null, username: null };
 let tiktokSessionId = null;
 
+function sendStatus(connected, message, state) {
+  if (mainWindow) {
+    mainWindow.webContents.send('tiktok:status', { connected, message, state });
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
@@ -39,7 +45,6 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
 
-  // ✅ เช็ค update เฉพาะ production
   if (!isDev) {
     setTimeout(() => {
       autoUpdater.checkForUpdates();
@@ -47,13 +52,10 @@ app.whenReady().then(() => {
   }
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-// ✅ auto-updater events
 autoUpdater.on('update-available', (info) => {
   if (mainWindow) mainWindow.webContents.send('update:available', info);
 });
@@ -70,18 +72,14 @@ autoUpdater.on('error', (err) => {
   console.error('[AutoUpdater Error]', err.message);
 });
 
-// ✅ IPC สั่ง install update
 ipcMain.handle('update:install', () => {
   autoUpdater.quitAndInstall();
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
-// IPC Handlers
 ipcMain.handle('license:activate', async (event, licenseKey) => {
   try {
     const result = await activateLicense(licenseKey);
@@ -100,10 +98,7 @@ ipcMain.handle('tiktok:connect', async () => {
 
   if (!tiktokSessionId) {
     try {
-      if (mainWindow) mainWindow.webContents.send('tiktok:status', {
-        connected: false,
-        message: 'กำลังตรวจสอบ session...'
-      });
+      sendStatus(false, 'กำลังตรวจสอบ session...', 'WAIT');
       tiktokSessionId = await getOrRequestSessionId();
     } catch (err) {
       console.warn('TikTok login skipped, connecting without sessionid');
@@ -118,8 +113,8 @@ ipcMain.handle('tiktok:connect', async () => {
   }
 
   const callbacks = {
-    onStatus: (connected, message) => {
-      if (mainWindow) mainWindow.webContents.send('tiktok:status', { connected, message });
+    onStatus: (connected, message, state = null) => {
+      sendStatus(connected, message, state || (connected ? 'LIVE' : 'OFFLINE'));
     },
     onGift: (data) => {
       if (mainWindow) mainWindow.webContents.send('tiktok:gift', data);
@@ -134,32 +129,33 @@ ipcMain.handle('tiktok:connect', async () => {
       if (mainWindow) mainWindow.webContents.send('tiktok:follow', data);
     },
     onError: async (message) => {
-      if (message.includes('Room ID') || message.includes('Websocket')) {
+      const isSessionError =
+        message.includes('Room ID') ||
+        message.includes('Websocket') ||
+        message.includes('401') ||
+        message.includes('unauthorized') ||
+        message.includes('UNAUTHORIZED');
+
+      if (isSessionError) {
         clearSessionId();
         tiktokSessionId = null;
         stopConnection();
 
         try {
-          if (mainWindow) mainWindow.webContents.send('tiktok:status', {
-            connected: false,
-            message: 'Session หมดอายุ กำลัง login ใหม่...'
-          });
+          sendStatus(false, 'Session หมดอายุ กำลัง login ใหม่...', 'WAIT');
           tiktokSessionId = await getOrRequestSessionId();
           startConnection(sessionInfo.username, middlewareClient, callbacks, tiktokSessionId);
         } catch (err) {
-          if (mainWindow) mainWindow.webContents.send('tiktok:status', {
-            connected: false,
-            message: 'Login ไม่สำเร็จ กรุณา connect ใหม่'
-          });
+          sendStatus(false, 'Login ไม่สำเร็จ กรุณา connect ใหม่', 'OFFLINE');
         }
         return;
       }
+
       if (mainWindow) mainWindow.webContents.send('tiktok:error', message);
     }
   };
 
   startConnection(sessionInfo.username, middlewareClient, callbacks, tiktokSessionId);
-
   return { ok: true };
 });
 
@@ -175,10 +171,7 @@ ipcMain.handle('tiktok:disconnect', async () => {
   sessionInfo.token = null;
   sessionInfo.username = null;
 
-  if (mainWindow) mainWindow.webContents.send('tiktok:status', {
-    connected: false,
-    message: 'Stopped. Please re-activate to start again.'
-  });
+  sendStatus(false, 'Stopped. Please re-activate to start again.', 'OFFLINE');
   return { ok: true };
 });
 
@@ -188,11 +181,8 @@ ipcMain.handle('window:minimize', () => {
 
 ipcMain.handle('window:maximize', () => {
   if (mainWindow) {
-    if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
-    } else {
-      mainWindow.maximize();
-    }
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
   }
 });
 
@@ -205,9 +195,7 @@ ipcMain.handle('window:close', () => {
 ipcMain.handle('app:close', () => {
   stopConnection();
   if (middlewareClient) {
-    middlewareClient.stop().catch(() => {}).finally(() => {
-      app.quit();
-    });
+    middlewareClient.stop().catch(() => {}).finally(() => app.quit());
   } else {
     app.quit();
   }
