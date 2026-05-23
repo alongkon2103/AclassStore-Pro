@@ -27,15 +27,15 @@ jobs:
         run: npm install
 
       - name: Set version from tag
+        shell: bash
         run: |
           VERSION=${{ github.ref_name }}
-          # ตัดตัว v ออกถ้ามี เช่น v1.0.6 -> 1.0.6
           VERSION=${VERSION#v}
           echo "Syncing package.json version to $VERSION"
           npm version $VERSION --no-git-tag-version
 
       - name: Build Electron App
-        run: npm run electron:build
+        run: npm run electron:build -- --win
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
