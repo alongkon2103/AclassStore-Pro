@@ -53,6 +53,13 @@
     "directories": {
       "output": "dist_electron"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "alongkon2103",
+        "repo": "AclassStore-Pro"
+      }
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",

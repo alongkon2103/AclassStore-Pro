@@ -26,8 +26,16 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
+      - name: Set version from tag
+        run: |
+          VERSION=${{ github.ref_name }}
+          # ตัดตัว v ออกถ้ามี เช่น v1.0.6 -> 1.0.6
+          VERSION=${VERSION#v}
+          echo "Syncing package.json version to $VERSION"
+          npm version $VERSION --no-git-tag-version
+
       - name: Build Electron App
-        run: npm run electron:build -- --publish never
+        run: npm run electron:build
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
@@ -36,6 +44,8 @@ jobs:
           name: 🚀 Aclass Live ${{ github.ref_name }}
           draft: false
           prerelease: false
-          files: dist_electron/AclassStoreLive.exe
+          files: |
+            dist_electron/AclassStoreLive.exe
+            dist_electron/latest.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

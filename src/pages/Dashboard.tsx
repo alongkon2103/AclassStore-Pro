@@ -33,6 +33,15 @@ interface StatusPayload {
 const Dashboard: React.FC = () => {
   const [licenseKey, setLicenseKey] = useState('');
   const [status, setStatus] = useState<AppStatus>('OFFLINE');
+
+  useEffect(() => {
+    // Load saved license key
+    const savedKey = localStorage.getItem('license_key');
+    if (savedKey) {
+      setLicenseKey(savedKey);
+    }
+  }, []);
+
   const [statusMessage, setStatusMessage] = useState('Waiting for connection');
   const [tiktokUser, setTiktokUser] = useState('');
 
@@ -62,23 +71,28 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     const offStatus = (window as any).electron.on('tiktok:status', (data: StatusPayload) => {
-      // ใช้ state จาก backend โดยตรง ไม่ต้อง parse string
-      if (data.state) {
-        setStatus(data.state);
+      console.log('Status Update:', data); // Debug log เพื่อดูว่าค่าที่ส่งมาคืออะไร
+      
+      if (data.state === 'LIVE' || data.connected === true) {
+        setStatus('LIVE');
+      } else if (data.state === 'WAIT') {
+        setStatus('WAIT');
       } else {
-        setStatus(data.connected ? 'LIVE' : 'OFFLINE');
+        setStatus('OFFLINE');
       }
 
       setStatusMessage(data.message);
       addSystemLog('system', data.message);
 
       if (data.connected) {
-        const match = data.message.match(/@(\w+)/);
+        // ดึงชื่อหลัง @ ออกมาจนจบข้อความ หรือจนเจอช่องว่าง
+        const match = data.message.match(/@([a-zA-Z0-9._-]+)/);
         if (match) setTiktokUser(match[1]);
       }
     });
 
     const offGift = (window as any).electron.on('tiktok:gift', (data: any) => {
+      setStatus('LIVE'); // Force LIVE
       const log: LogEntry = {
         id: data.id || Date.now() + Math.random(),
         time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
@@ -95,6 +109,7 @@ const Dashboard: React.FC = () => {
     });
 
     const offChat = (window as any).electron.on('tiktok:chat', (data: any) => {
+      setStatus('LIVE');
       const log: LogEntry = {
         id: Date.now() + Math.random(),
         time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
@@ -106,6 +121,7 @@ const Dashboard: React.FC = () => {
     });
 
     const offLike = (window as any).electron.on('tiktok:like', (data: any) => {
+      setStatus('LIVE');
       const log: LogEntry = {
         id: Date.now() + Math.random(),
         time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
@@ -119,6 +135,7 @@ const Dashboard: React.FC = () => {
     });
 
     const offFollow = (window as any).electron.on('tiktok:follow', (data: any) => {
+      setStatus('LIVE');
       const log: LogEntry = {
         id: Date.now() + Math.random(),
         time: new Date().toLocaleTimeString('en-GB', { hour12: false }),
@@ -159,7 +176,15 @@ const Dashboard: React.FC = () => {
       return;
     }
 
+    // Save license key on success
+    localStorage.setItem('license_key', licenseKey);
+
+    setTiktokUser(res.username);
     addSystemLog('system', `License activated for @${res.username}`);
+    
+    // Set to WAIT before connecting, then let the listener handle the rest
+    setStatus('WAIT'); 
+    
     const connRes = await (window as any).electron.invoke('tiktok:connect');
     if (!connRes.ok) {
       setStatus('OFFLINE');
