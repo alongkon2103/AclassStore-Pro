@@ -31,43 +31,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Tag Version
-        id: get_version
-        shell: bash
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: 🚀 Aclass Live - เวอร์ชัน v${{ steps.get_version.outputs.VERSION }} (Official Release)
+          name: 🚀 Aclass Live ${{ github.ref_name }}
           draft: false
           prerelease: false
-          files: |
-            dist/*.exe
-            dist/*.blockmap
-            dist/*.yml
-          body: |
-            ยินดีต้อนรับสู่โปรแกรม **Aclass Live**
-
-            ---
-
-            ## 📦 ช่องทางดาวน์โหลด
-
-            เลื่อนลงไปที่หัวข้อ **Assets** ด้านล่างสุดแล้วดาวน์โหลดไฟล์ `AclassLive-Setup-${{ steps.get_version.outputs.VERSION }}.exe`
-
-            ---
-
-            ## 🛠️ วิธีการติดตั้ง
-
-            1. ดับเบิลคลิกไฟล์ `.exe` เพื่อติดตั้ง
-            2. โปรแกรมจะเปิดขึ้นมาทันทีหลังติดตั้ง
-
-            > ⚠️ หาก Windows ขึ้น SmartScreen ให้กด "More info" แล้วเลือก "Run anyway"
-
-            ---
-
-            💡 หากพบปัญหา ติดต่อทีม AclassStore ได้ตลอด 24 ชั่วโมง
-
+          files: dist_electron/AclassStoreLive.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

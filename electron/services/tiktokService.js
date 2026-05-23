@@ -4,43 +4,77 @@ let tiktokConnection = null;
 let heartbeatTimer = null;
 let retryTimer = null;
 let isStopping = false;
+let retryCount = 0;
 
-const RETRY_INTERVAL = 30000;
 const HEARTBEAT_INTERVAL = 15000;
+const BASE_RETRY = 10000;
+const MAX_RETRY = 60000;
 
-function startConnection(tiktokUsername, middlewareClient, callbacks) {
+function getRetryDelay() {
+  const delay = Math.min(BASE_RETRY * Math.pow(2, retryCount), MAX_RETRY);
+  const jitter = Math.random() * 5000;
+  retryCount++;
+  return delay + jitter;
+}
+
+function clearTimers() {
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+}
+
+function destroyConnection() {
+  if (tiktokConnection) {
+    try {
+      tiktokConnection.removeAllListeners();
+      tiktokConnection.disconnect();
+    } catch (e) { }
+    tiktokConnection = null;
+  }
+}
+
+// เพิ่ม sessionid parameter
+
+function startConnection(tiktokUsername, middlewareClient, callbacks, sessionData = null) {
+
   isStopping = false;
+  retryCount = 0;
 
   async function connect() {
     if (isStopping) return;
 
-    // Clean up existing connection if any
-    if (tiktokConnection) {
-      try { tiktokConnection.disconnect(); } catch (e) { }
-      tiktokConnection = null;
+    clearTimers();
+    destroyConnection();
+
+    const options = {
+      processInitialData: true,
+      enableWebsocketUpgrade: true,
+      requestPollingIntervalMs: 2000,
+      reconnectEnabled: false,
+    };
+
+    // ใส่ทั้ง sessionId และ ttTargetIdc
+    if (sessionData?.sessionid && sessionData?.idc) {
+      options.sessionId = sessionData.sessionid;
+      options.ttTargetIdc = sessionData.idc;
     }
 
-    tiktokConnection = new WebcastPushConnection(tiktokUsername, {
-      processInitialData: false,
-      enableWebsocketUpgrade: true,
-      requestPollingIntervalMs: 2000
-    });
-    tiktokConnection.on('connected', (state) => {
+    tiktokConnection = new WebcastPushConnection(tiktokUsername, options);
+
+    tiktokConnection.on('connected', () => {
+      retryCount = 0;
       callbacks.onStatus(true, `Live @${tiktokUsername}`);
       middlewareClient.push_event('status', { connected: true }).catch(() => { });
-
-      // Start Heartbeat
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
       heartbeatTimer = setInterval(() => {
         middlewareClient.heartbeat().catch(() => { });
       }, HEARTBEAT_INTERVAL);
     });
 
     tiktokConnection.on('disconnected', () => {
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      clearTimers();
       if (!isStopping) {
-        callbacks.onStatus(false, `Disconnected — retry in ${RETRY_INTERVAL / 1000}s`);
-        scheduleRetry();
+        const delay = getRetryDelay();
+        callbacks.onStatus(false, `Disconnected — retry in ${Math.round(delay / 1000)}s`);
+        scheduleRetry(delay);
       }
     });
 
@@ -50,33 +84,36 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
     });
 
     tiktokConnection.on('error', (err) => {
-      // Normalize error message
-      let errMsg = '';
-      if (typeof err === 'string') {
-        errMsg = err;
-      } else if (err && err.message) {
-        errMsg = err.message;
-      } else {
-        try {
-          errMsg = JSON.stringify(err);
-        } catch (e) {
-          errMsg = String(err);
-        }
+      const errMsg = typeof err === 'string' ? err : err?.message || JSON.stringify(err);
+
+      if (
+        errMsg.includes('already connected') ||
+        errMsg.includes('Websocket') ||
+        errMsg.includes('Handshake')
+      ) {
+        console.warn('[TikTok Minor Error]', errMsg);
+        return;
       }
 
-      // Don't show minor background errors if we are still connected
-      if (errMsg.includes('already connected') || errMsg.includes('Websocket') || errMsg.includes('Handshake')) {
-        console.warn('[TikTok Minor Error]', errMsg);
+      // Room ID error รอนานขึ้น
+      if (errMsg.includes('Failed to retrieve Room ID')) {
+        console.warn('[Room ID Error] waiting longer...');
+        if (!isStopping) {
+          clearTimers();
+          const delay = getRetryDelay();
+          scheduleRetry(delay);
+        }
         return;
       }
 
       callbacks.onError(`[TikTok] ${errMsg}`);
       if (!isStopping && !tiktokConnection?.connected) {
-        scheduleRetry();
+        clearTimers();
+        const delay = getRetryDelay();
+        scheduleRetry(delay);
       }
     });
 
-    // Events
     tiktokConnection.on('gift', (data) => {
       const diamondCount = data.diamondCount || 0;
       if (diamondCount > 0 || data.repeatEnd) {
@@ -96,12 +133,10 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
         };
         middlewareClient.push_event('gift', eventData)
           .then(result => {
-            console.log('[DEBUG RESULT]', JSON.stringify(result)); // ✅ เพิ่มตรงนี้
-            if (!result) {
-              console.error('[PUSH_EVENT FAILED] server rejected gift');
+            if (!result || result.pushed === false) {
+              console.error('[PUSH_EVENT FAILED]');
               return;
             }
-            if (result.pushed === false) return;
             callbacks.onGift(eventData);
           })
           .catch(err => console.error('[PUSH_EVENT ERROR]', err.message));
@@ -143,18 +178,17 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
       await tiktokConnection.connect();
     } catch (err) {
       if (!isStopping) {
-        const errMsg = err.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
-        callbacks.onStatus(false, `${errMsg} — retry in ${RETRY_INTERVAL / 1000}s`);
-        scheduleRetry();
+        const errMsg = err?.message || String(err);
+        const delay = getRetryDelay();
+        callbacks.onStatus(false, `${errMsg} — retry in ${Math.round(delay / 1000)}s`);
+        scheduleRetry(delay);
       }
     }
   }
 
-  function scheduleRetry() {
-    if (retryTimer) clearTimeout(retryTimer);
-    if (!isStopping) {
-      retryTimer = setTimeout(connect, RETRY_INTERVAL);
-    }
+  function scheduleRetry(delay) {
+    if (isStopping) return;
+    retryTimer = setTimeout(connect, delay);
   }
 
   connect();
@@ -162,12 +196,8 @@ function startConnection(tiktokUsername, middlewareClient, callbacks) {
 
 function stopConnection() {
   isStopping = true;
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  if (retryTimer) clearTimeout(retryTimer);
-  if (tiktokConnection) {
-    try { tiktokConnection.disconnect(); } catch (e) { }
-    tiktokConnection = null;
-  }
+  clearTimers();
+  destroyConnection();
 }
 
 module.exports = { startConnection, stopConnection };
