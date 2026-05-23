@@ -5,18 +5,14 @@ const isDev = process.env.NODE_ENV === 'development';
 const { activateLicense } = require('./services/licenseService');
 const { MiddlewareClient } = require('./services/middlewareClient');
 const { startConnection, stopConnection } = require('./services/tiktokService');
-
-// const SERVER_URL = isDev ? "http://127.0.0.1:3001" : "https://api.aclassstore.com";
-
-// const SERVER_URL = "http://127.0.0.1:3001";
+const { getOrRequestSessionId, clearSessionId } = require('./services/tiktokAuth');
 
 const SERVER_URL = "https://api.aclassstore.com";
 
-
 let mainWindow;
 let middlewareClient = null;
-// sessionInfo holds the current valid session data
 let sessionInfo = { token: null, username: null };
+let tiktokSessionId = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -58,7 +54,6 @@ app.on('window-all-closed', () => {
 // IPC Handlers
 ipcMain.handle('license:activate', async (event, licenseKey) => {
   try {
-    // Every activation returns a fresh token
     const result = await activateLicense(licenseKey);
     sessionInfo.token = result.token;
     sessionInfo.username = result.tiktokUsername;
@@ -73,12 +68,22 @@ ipcMain.handle('tiktok:connect', async () => {
     return { ok: false, error: 'Not authenticated. Please activate license first.' };
   }
 
-  // Create a new client instance for every connection to ensure fresh state
+  if (!tiktokSessionId) {
+    try {
+      if (mainWindow) mainWindow.webContents.send('tiktok:status', {
+        connected: false,
+        message: 'กำลังตรวจสอบ session...'
+      });
+      tiktokSessionId = await getOrRequestSessionId();
+    } catch (err) {
+      console.warn('TikTok login skipped, connecting without sessionid');
+    }
+  }
+
   middlewareClient = new MiddlewareClient(SERVER_URL, sessionInfo.token, sessionInfo.username);
   const registered = await middlewareClient.register();
-  
+
   if (!registered) {
-    // If registration fails with 401, it means the token was revoked
     return { ok: false, error: 'Connection rejected by server (Token revoked). Please re-activate.' };
   }
 
@@ -101,27 +106,28 @@ ipcMain.handle('tiktok:connect', async () => {
     onError: (message) => {
       if (mainWindow) mainWindow.webContents.send('tiktok:error', message);
     }
-  });
+  }, tiktokSessionId);
 
   return { ok: true };
 });
 
 ipcMain.handle('tiktok:disconnect', async () => {
-  // We stop the TikTok connection first
   stopConnection();
-  
+  tiktokSessionId = null;
+  // ไม่ clearSessionId() เพื่อให้ครั้งต่อไปไม่ต้อง login ใหม่
+
   if (middlewareClient) {
-    // Note: The original Python app calls /stop which blacklists the token.
-    // If the user wants to reconnect, they MUST re-activate to get a new token.
     try { await middlewareClient.stop(); } catch (e) {}
     middlewareClient = null;
   }
-  
-  // Clear local session after stop to force re-activation
+
   sessionInfo.token = null;
   sessionInfo.username = null;
 
-  if (mainWindow) mainWindow.webContents.send('tiktok:status', { connected: false, message: 'Stopped. Please re-activate to start again.' });
+  if (mainWindow) mainWindow.webContents.send('tiktok:status', {
+    connected: false,
+    message: 'Stopped. Please re-activate to start again.'
+  });
   return { ok: true };
 });
 
