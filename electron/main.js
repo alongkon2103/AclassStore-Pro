@@ -6,6 +6,7 @@ const { activateLicense } = require('./services/licenseService');
 const { MiddlewareClient } = require('./services/middlewareClient');
 const { startConnection, stopConnection } = require('./services/tiktokService');
 const { getOrRequestSessionId, clearSessionId } = require('./services/tiktokAuth');
+const { autoUpdater } = require('electron-updater');
 
 const SERVER_URL = "https://api.aclassstore.com";
 
@@ -38,11 +39,40 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
 
+  // ✅ เช็ค update เฉพาะ production
+  if (!isDev) {
+    setTimeout(() => {
+      autoUpdater.checkForUpdates();
+    }, 3000);
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
+});
+
+// ✅ auto-updater events
+autoUpdater.on('update-available', (info) => {
+  if (mainWindow) mainWindow.webContents.send('update:available', info);
+});
+
+autoUpdater.on('update-downloaded', () => {
+  if (mainWindow) mainWindow.webContents.send('update:downloaded');
+});
+
+autoUpdater.on('download-progress', (progress) => {
+  if (mainWindow) mainWindow.webContents.send('update:progress', progress);
+});
+
+autoUpdater.on('error', (err) => {
+  console.error('[AutoUpdater Error]', err.message);
+});
+
+// ✅ IPC สั่ง install update
+ipcMain.handle('update:install', () => {
+  autoUpdater.quitAndInstall();
 });
 
 app.on('window-all-closed', () => {
@@ -87,7 +117,7 @@ ipcMain.handle('tiktok:connect', async () => {
     return { ok: false, error: 'Connection rejected by server (Token revoked). Please re-activate.' };
   }
 
-  startConnection(sessionInfo.username, middlewareClient, {
+  const callbacks = {
     onStatus: (connected, message) => {
       if (mainWindow) mainWindow.webContents.send('tiktok:status', { connected, message });
     },
@@ -103,10 +133,32 @@ ipcMain.handle('tiktok:connect', async () => {
     onFollow: (data) => {
       if (mainWindow) mainWindow.webContents.send('tiktok:follow', data);
     },
-    onError: (message) => {
+    onError: async (message) => {
+      if (message.includes('Room ID') || message.includes('Websocket')) {
+        clearSessionId();
+        tiktokSessionId = null;
+        stopConnection();
+
+        try {
+          if (mainWindow) mainWindow.webContents.send('tiktok:status', {
+            connected: false,
+            message: 'Session หมดอายุ กำลัง login ใหม่...'
+          });
+          tiktokSessionId = await getOrRequestSessionId();
+          startConnection(sessionInfo.username, middlewareClient, callbacks, tiktokSessionId);
+        } catch (err) {
+          if (mainWindow) mainWindow.webContents.send('tiktok:status', {
+            connected: false,
+            message: 'Login ไม่สำเร็จ กรุณา connect ใหม่'
+          });
+        }
+        return;
+      }
       if (mainWindow) mainWindow.webContents.send('tiktok:error', message);
     }
-  }, tiktokSessionId);
+  };
+
+  startConnection(sessionInfo.username, middlewareClient, callbacks, tiktokSessionId);
 
   return { ok: true };
 });
@@ -114,7 +166,6 @@ ipcMain.handle('tiktok:connect', async () => {
 ipcMain.handle('tiktok:disconnect', async () => {
   stopConnection();
   tiktokSessionId = null;
-  // ไม่ clearSessionId() เพื่อให้ครั้งต่อไปไม่ต้อง login ใหม่
 
   if (middlewareClient) {
     try { await middlewareClient.stop(); } catch (e) {}

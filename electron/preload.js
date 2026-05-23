@@ -9,4 +9,8 @@ contextBridge.exposeInMainWorld('electron', {
   },
   off: (channel, callback) => ipcRenderer.removeListener(channel, callback),
   send: (channel, ...args) => ipcRenderer.send(channel, ...args),
+  onUpdateAvailable: (cb) => ipcRenderer.on('update:available', (_, info) => cb(info)),
+  onUpdateDownloaded: (cb) => ipcRenderer.on('update:downloaded', () => cb()),
+  onUpdateProgress: (cb) => ipcRenderer.on('update:progress', (_, p) => cb(p)),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
 });

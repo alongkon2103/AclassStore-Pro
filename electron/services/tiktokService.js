@@ -1,4 +1,4 @@
-const { WebcastPushConnection } = require('tiktok-live-connector');
+const { WebcastPushConnection, WebcastEvent } = require('tiktok-live-connector');
 
 let tiktokConnection = null;
 let heartbeatTimer = null;
@@ -27,17 +27,16 @@ function destroyConnection() {
     try {
       tiktokConnection.removeAllListeners();
       tiktokConnection.disconnect();
-    } catch (e) { }
+    } catch (e) {}
     tiktokConnection = null;
   }
 }
 
-// เพิ่ม sessionid parameter
-
 function startConnection(tiktokUsername, middlewareClient, callbacks, sessionData = null) {
-
   isStopping = false;
   retryCount = 0;
+
+  console.log('[TikTok Service] sessionData:', sessionData);
 
   async function connect() {
     if (isStopping) return;
@@ -52,24 +51,27 @@ function startConnection(tiktokUsername, middlewareClient, callbacks, sessionDat
       reconnectEnabled: false,
     };
 
-    // ใส่ทั้ง sessionId และ ttTargetIdc
     if (sessionData?.sessionid && sessionData?.idc) {
       options.sessionId = sessionData.sessionid;
       options.ttTargetIdc = sessionData.idc;
+      console.log('[TikTok Service] Using session cookie ✅');
+    } else {
+      console.log('[TikTok Service] No session data ❌');
     }
 
+    console.log('[TikTok] Connecting to username:', tiktokUsername);
     tiktokConnection = new WebcastPushConnection(tiktokUsername, options);
 
-    tiktokConnection.on('connected', () => {
+    tiktokConnection.on(WebcastEvent.CONNECTED, () => {
       retryCount = 0;
       callbacks.onStatus(true, `Live @${tiktokUsername}`);
-      middlewareClient.push_event('status', { connected: true }).catch(() => { });
+      middlewareClient.push_event('status', { connected: true }).catch(() => {});
       heartbeatTimer = setInterval(() => {
-        middlewareClient.heartbeat().catch(() => { });
+        middlewareClient.heartbeat().catch(() => {});
       }, HEARTBEAT_INTERVAL);
     });
 
-    tiktokConnection.on('disconnected', () => {
+    tiktokConnection.on(WebcastEvent.DISCONNECTED, () => {
       clearTimers();
       if (!isStopping) {
         const delay = getRetryDelay();
@@ -78,43 +80,24 @@ function startConnection(tiktokUsername, middlewareClient, callbacks, sessionDat
       }
     });
 
-    tiktokConnection.on('streamEnd', () => {
+    tiktokConnection.on(WebcastEvent.STREAM_END, () => {
       callbacks.onStatus(false, 'Stream ended');
       stopConnection();
     });
 
-    tiktokConnection.on('error', (err) => {
-      const errMsg = typeof err === 'string' ? err : err?.message || JSON.stringify(err);
-
-      if (
-        errMsg.includes('already connected') ||
-        errMsg.includes('Websocket') ||
-        errMsg.includes('Handshake')
-      ) {
-        console.warn('[TikTok Minor Error]', errMsg);
-        return;
-      }
-
-      // Room ID error รอนานขึ้น
-      if (errMsg.includes('Failed to retrieve Room ID')) {
-        console.warn('[Room ID Error] waiting longer...');
-        if (!isStopping) {
-          clearTimers();
-          const delay = getRetryDelay();
-          scheduleRetry(delay);
-        }
-        return;
-      }
+    tiktokConnection.on(WebcastEvent.ERROR, (err) => {
+      console.log('[TikTok Full Error]', JSON.stringify(err, null, 2));
+      const errMsg = typeof err === 'string' ? err : err?.message || err?.info || JSON.stringify(err);
 
       callbacks.onError(`[TikTok] ${errMsg}`);
-      if (!isStopping && !tiktokConnection?.connected) {
+      if (!isStopping) {
         clearTimers();
         const delay = getRetryDelay();
         scheduleRetry(delay);
       }
     });
 
-    tiktokConnection.on('gift', (data) => {
+    tiktokConnection.on(WebcastEvent.GIFT, (data) => {
       const diamondCount = data.diamondCount || 0;
       if (diamondCount > 0 || data.repeatEnd) {
         const eventData = {
@@ -143,33 +126,33 @@ function startConnection(tiktokUsername, middlewareClient, callbacks, sessionDat
       }
     });
 
-    tiktokConnection.on('chat', (data) => {
+    tiktokConnection.on(WebcastEvent.CHAT, (data) => {
       middlewareClient.push_event('chat', {
         username: data.uniqueId,
         nickname: data.nickname,
         comment: data.comment,
         profilePictureUrl: data.profilePictureUrl
-      }).catch(() => { });
+      }).catch(() => {});
       callbacks.onChat?.(data);
     });
 
-    tiktokConnection.on('like', (data) => {
+    tiktokConnection.on(WebcastEvent.LIKE, (data) => {
       middlewareClient.push_event('like', {
         username: data.uniqueId,
         nickname: data.nickname,
         likeCount: data.likeCount,
         totalLikeCount: data.totalLikeCount,
         profilePictureUrl: data.profilePictureUrl
-      }).catch(() => { });
+      }).catch(() => {});
       callbacks.onLike?.(data);
     });
 
-    tiktokConnection.on('follow', (data) => {
+    tiktokConnection.on(WebcastEvent.FOLLOW, (data) => {
       middlewareClient.push_event('follow', {
         username: data.uniqueId,
         nickname: data.nickname,
         profilePictureUrl: data.profilePictureUrl
-      }).catch(() => { });
+      }).catch(() => {});
       callbacks.onFollow?.(data);
     });
 
