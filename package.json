@@ -60,9 +60,7 @@
       "package.json"
     ],
     "win": {
-      "target": [
-        "nsis"
-      ],
+      "target": ["nsis"],
       "icon": "build/icon.ico",
       "artifactName": "AclassStoreLive.exe"
     },
@@ -72,13 +70,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Aclass Live"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "alongkon2103",
-        "repo": "AclassStore-Pro"
-      }
-    ]
+    }
   }
 }
