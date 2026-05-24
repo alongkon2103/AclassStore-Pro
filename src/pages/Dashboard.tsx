@@ -304,9 +304,6 @@ const Dashboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
-            <button className="p-2 hover:bg-surface2 rounded-lg transition-colors text-text3">
-              <Settings size={18} />
-            </button>
             <button
               onClick={closeApp}
               className="p-2 hover:bg-red/10 hover:text-red rounded-lg transition-colors text-text3"
