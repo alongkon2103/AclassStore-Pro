@@ -216,7 +216,7 @@ const Dashboard: React.FC = () => {
     icon: React.ReactNode;
     color: string;
     logs: LogEntry[];
-    scrollRef: React.RefObject<HTMLDivElement | null>;
+    scrollRef: React.RefObject<any>;
     renderLine: (log: LogEntry) => React.ReactNode;
   }) => (
     <div className="flex flex-col bg-surface border border-border rounded-xl overflow-hidden h-full shadow-lg">
